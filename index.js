@@ -1,11 +1,12 @@
 #!/usr/bin/env node --harmony
 
-var program     = require('commander')
-var sonos       = require('sonos')
-var Sonos       = require('sonos').Sonos
-var chalk       = require('chalk');
+const program     = require('commander')
+const sonos       = require('sonos')
+const Sonos       = require('sonos').Sonos
+const chalk       = require('chalk');
+const fs          = require('fs');
+var blocked       = require('./artists.json');
 
-let new_order_thwarted = 0;
 
 function slugify(text) {
   return text.toString().toLowerCase()
@@ -29,31 +30,49 @@ function fancyTimeFormat(time) {
     return ret;
 }
 
+function watchSonos(ip, blocked) {
+  sonos.search(function (sonos) {
+    if(sonos.host === ip) {
+      console.log(chalk.green("Connected"));
+      sonos_class = new Sonos(sonos.host)
+      setInterval(function() {
+        sonos.currentTrack(function (err, track) {
+          if(typeof track.artist !== 'undefined') {
+            process.stdout.clearLine();
+            for(let i = 0; i < blocked.artists.length; i ++) {
+            let artist_slug = slugify(track.artist + track.title);
+            let block_slug  = slugify(blocked.artists[i]);
+            process.stdout.write(chalk.green("Now Playing: ") + track.artist + " - " + track.title + " | " + chalk.blue(fancyTimeFormat(track.position) + "/" + fancyTimeFormat(track.duration)) + "\r");
+              if(!artist_slug.indexOf(block_slug)) {
+                sonos.next(function (err, nexted) {});
+                process.stdout.clearLine();
+                process.stdout.write(chalk.red(blocked.artists[i] + " Detected, Skipping") + "\r");
+              }
+            }            
+          }
+        })
+      }, 5000);
+    }
+})
+}
 
 program
   .arguments('<ip>')
+  .option('-b, --blocklist <file>', 'Json file of artists to block')
   .action(function(ip) {
-    console.log(chalk.blue("No Order - Stops Sonos from Playing New Order - V1"));
-    sonos.search(function (sonos) {
-        if(sonos.host === ip) {
-          console.log(chalk.green("Connected"));
-          sonos_class = new Sonos(sonos.host)
-          setInterval(function() {
-            sonos.currentTrack(function (err, track) {
-              if(typeof track.artist !== 'undefined') {
-                let artist_slug = slugify(track.artist + track.title);
-                process.stdout.clearLine();
-                process.stdout.write(chalk.green("Now Playing: ") + track.artist + " - " + track.title + " | " + chalk.blue(fancyTimeFormat(track.position) + "/" + fancyTimeFormat(track.duration)) + " | " + "New Order has been skipped " + new_order_thwarted + " times" + "\r");                
-                if(artist_slug.indexOf('neworder') !== -1) {
-                  new_order_thwarted++;
-                  sonos.next(function (err, nexted) {});
-                  process.stdout.clearLine();
-                  process.stdout.write(chalk.red("New Order Detected, Skipping") + "\r");
-                }
-              }
-            })
-          }, 5000);
+    console.log(chalk.blue("Not-ify - Take control of your Sonos"));
+    
+    if(program.blocklist) {
+      fs.readFile('./' + program.blocklist, 'utf8', function (err,data) {
+        if (err) {
+          return console.log(err);
         }
-    })
+        console.log(data);
+        watchSonos(ip, JSON.parse(data));
+      });
+    } else {
+      watchSonos(ip, blocked);
+    }
+    
   }).parse(process.argv);
   
